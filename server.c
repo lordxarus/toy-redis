@@ -26,7 +26,7 @@ static void do_something(int connfd)
 +-----+------+-----+------+--------
 | len | msg1 | len | msg2 | more...
 +-----+------+-----+------+--------
-The protocol consists of 2 parts: a 4-byte little-endian integer indicating the length of the following request, and a variable length request.
+The protocol consists of 2 parts: a 4-byte little-endian integer (uint32) indicating the length of the following request, and a variable length request.
 **/
 
 static int32_t one_request(int connfd)
@@ -74,6 +74,64 @@ static int32_t one_request(int connfd)
 	return write_all(connfd, wbuf, 4 + len);
 }
 
+static int32_t many_requests(int connfd)
+{
+	// Read nBytes from the kernel
+	// Try to parse out messages
+	// Currently using read_full but what we should do is:
+	// nRead = read(nbytes)
+	// get the len (first 4 bytes)
+	// if len == nRead - 4
+	//     we have one message
+	// elseif len > nRead - 4
+	//     we haven't read enough
+	//     read(nLeft)
+	// elseif len < nRead - 4
+	//
+
+	int nMsg = 5;
+	int nBytes = (4 + MAX_MSG + 1) * nMsg;
+
+	// 4 bytes header
+	char rbuf[nBytes];
+
+	errno = 0;
+	int32_t nRead = read(connfd, rbuf, nBytes);
+
+	if (nRead == -1) {
+		if (errno == 0) {
+			S_MSG("EOF");
+		} else {
+			S_MSG("read() error");
+		}
+		return nRead;
+	}
+
+	uint32_t len = 0;
+	memcpy(&len, rbuf, 4);
+
+	if (len > MAX_MSG) {
+		S_MSG("too long");
+		return -1;
+	}
+
+	if (len == nRead - 4) {
+		rbuf[4 + len] = '\0';
+		printf("client says: %s\n", &rbuf[4]);
+	}
+
+	// do something
+
+	// reply using the same protocol
+	const char reply[] = "world";
+	char wbuf[4 + sizeof(reply)];
+	len = (uint32_t)strlen(reply);
+	memcpy(wbuf, &len, 4);
+	memcpy(&wbuf[4], reply, len);
+
+	return write_all(connfd, wbuf, 4 + len);
+}
+
 int main(void)
 {
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -101,12 +159,7 @@ int main(void)
 		if (connfd < 0) {
 			continue;
 		}
-		while (true) {
-			int32_t err = one_request(connfd);
-			if (err) {
-				break;
-			}
-		}
+		int32_t err = many_requests(connfd);
 		close(connfd);
 	}
 }
